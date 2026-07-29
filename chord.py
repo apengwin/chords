@@ -1,13 +1,15 @@
-from music21 import note, stream
-from music21 import environment
 import numpy as np
 import scipy.io.wavfile
+from music21 import environment, note, stream
 from scipy.signal import find_peaks
+
+A4 = 440.0 
+NOTES = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
 
 env = environment.UserSettings()
 env["lilypondPath"] = "/opt/homebrew/bin/lilypond"
 
-sample_rate, signal = scipy.io.wavfile.read("/Users/allan/Downloads/cmajor_mono.wav")
+sample_rate, signal = scipy.io.wavfile.read("/Users/allan/Downloads/cmajor_out2.wav")
 signal = signal.astype(np.float64)
 
 # window to reduce spectral leakage
@@ -25,11 +27,9 @@ peaks, properties = find_peaks(fft_normalized, height=0.1, distance=20)
 
 # map frequencies to canonical note
 def freq_to_note(freq):
-    A4 = 440.0 
     if freq <= 0:
         return None
     steps_relative_A4 = 12 * np.log2(freq / A4)
-    NOTES = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
     note_index = round(steps_relative_A4) % 12
     octave = 4 + (round(steps_relative_A4) + 9) // 12
     return f"{NOTES[note_index]}{octave}"
