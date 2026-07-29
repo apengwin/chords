@@ -1,8 +1,9 @@
-import time
 import threading
 
+# import time
 import numpy as np
 import sounddevice as sd
+from pynput import keyboard
 
 RATE = 44100  # Sample rate
 duration = 1.0  # Duration per note in seconds
@@ -19,13 +20,16 @@ NOTES = {
     "A": A,
     "B": A * HALF_STEP,
     # Use the weird german nomenclature so we at least get another note
-    "H": A * np.pow(HALF_STEP, 2)
+    "H": A * np.pow(HALF_STEP, 2),
+    "O": A * np.pow(HALF_STEP, 3)
 } 
 
 DECAY_RATE = 5
 
 notes_active = []
 samples_read = 0
+
+notes_lock = threading.Lock()
 
 class Note:
     def __init__(self, frequency, start, end):
@@ -43,36 +47,37 @@ def callback(outdata, frames, _, status):
     # The absolute timestamps of the audio segment to return
     timestamps = (np.arange(frames) + samples_read)
 
-    for note in notes_active:
-        if note.end < samples_read:
-            continue
+    with notes_lock:
+        for note in notes_active:
+            if note.end < samples_read:
+                continue
 
-        notes_still_active.append(note)
+            notes_still_active.append(note)
 
-        # For this note, the timestamps that it is making a sound
-        active_timestamps = (timestamps  > note.start) & (timestamps< note.end)
+            # For this note, the timestamps that it is making a sound
+            active_timestamps = (timestamps  > note.start) & (timestamps< note.end)
 
-        # Note that timestamps - note.start should give an array of how far into the note we are.
-        # It is an array of consecutive integers, where the index where the value is 0 corresponds
-        # the index of timestamps where the note begins.
-        timestamps_relative_to_this_note = timestamps - note.start
-        decay = np.exp(-1 * DECAY_RATE * (timestamps_relative_to_this_note / RATE))
+            # Note that timestamps - note.start should give an array of how far into the note we are.
+            # It is an array of consecutive integers, where the index where the value is 0 corresponds
+            # the index of timestamps where the note begins.
+            timestamps_relative_to_this_note = timestamps - note.start
+            decay = np.exp(-1 * DECAY_RATE * (timestamps_relative_to_this_note / RATE))
 
-        # Construct a note by 
-        #   1. creating the sine wave with the note frequency
-        #   2. adding some decay.
-        # But we need to account for the fact that the callback could have been called mid-note.
-        # The values of the sine wave and the dceay have to be calculated relative to the position where we are in
-        # this note's lifetime.
-        note_wave_raw = np.sin(2 * np.pi * note.frequency *(timestamps_relative_to_this_note)/ RATE) * decay
+            # Construct a note by 
+            #   1. creating the sine wave with the note frequency
+            #   2. adding some decay.
+            # But we need to account for the fact that the callback could have been called mid-note.
+            # The values of the sine wave and the dceay have to be calculated relative to the position where we are in
+            # this note's lifetime.
+            note_wave_raw = np.sin(2 * np.pi * note.frequency *(timestamps_relative_to_this_note)/ RATE) * decay
 
-        # Zero out everything that isn't an active timestamp.
-        note_wave = np.where(active_timestamps, note_wave_raw, 0)
+            # Zero out everything that isn't an active timestamp.
+            note_wave = np.where(active_timestamps, note_wave_raw, 0)
 
-        data += note_wave
+            data += note_wave
 
-    samples_read += frames
-    notes_active[:] = notes_still_active
+        notes_active[:] = notes_still_active
+        samples_read += frames
     outdata[:, 0] = data
 
 def seed_notes():
@@ -80,16 +85,21 @@ def seed_notes():
     notes_active.append(Note(A * 1.5, RATE /10, RATE * 5))
     
 def play(note):
-    notes_active.append(Note(NOTES[note], samples_read, samples_read + RATE * duration))
+    with notes_lock:
+        notes_active.append(Note(NOTES[note], samples_read, samples_read + RATE * duration))
+
+def on_press(key):
+    if key == keyboard.Key.esc or key.char == 'q':
+        print("quitting!")
+        return False
+    elif key.char.upper() in NOTES:
+        play(key.char.upper())
 
 
 #seed_notes()
 stream = sd.OutputStream(samplerate=RATE, channels=1, callback=callback)
 stream.start()
-play("A")
-time.sleep(0.03)
-play("H")
 
+with keyboard.Listener(on_press=on_press) as listener:
+    listener.join()
 
-while True:
-    pass
